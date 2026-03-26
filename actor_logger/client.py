@@ -93,6 +93,8 @@ class ActorLogger:
             "memory_mbytes": os.getenv("APIFY_MEMORY_MBYTES"),
             "build_number": os.getenv("ACTOR_BUILD_NUMBER"),
             "apify_meta_origin": os.getenv("APIFY_META_ORIGIN"),
+            "max_total_charge_usd": os.getenv("ACTOR_MAX_TOTAL_CHARGE_USD"),
+            "is_paying": os.getenv("APIFY_USER_IS_PAYING"),
         }
 
     def _post(self, data: dict) -> bool:

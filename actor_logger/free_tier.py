@@ -7,7 +7,10 @@ cannot delete the KV store to reset their counter.
 import logging
 import os
 
-from apify_client import ApifyClientAsync
+try:
+    from apify_client import ApifyClientAsync
+except ImportError:
+    ApifyClientAsync = None
 
 logger = logging.getLogger(__name__)
 

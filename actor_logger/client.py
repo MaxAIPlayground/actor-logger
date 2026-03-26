@@ -88,7 +88,7 @@ class ActorLogger:
         })
 
     def _meta(self) -> dict:
-        return {
+        meta = {
             "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "run_id": os.getenv("APIFY_ACT_RUN_ID"),
             "actor_id": resolve_actor_id(),
@@ -99,6 +99,10 @@ class ActorLogger:
             "max_total_charge_usd": os.getenv("ACTOR_MAX_TOTAL_CHARGE_USD"),
             "is_paying": os.getenv("APIFY_USER_IS_PAYING"),
         }
+        topic = os.getenv("ACTOR_LOG_TOPIC", "").strip()
+        if topic:
+            meta["topic"] = topic
+        return meta
 
     def _post(self, data: dict, wait: bool = False) -> bool:
         """POST via background thread. Set wait=True to block until delivered."""

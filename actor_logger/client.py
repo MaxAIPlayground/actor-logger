@@ -62,17 +62,20 @@ class ActorLogger:
             "error": error_info,
             "context": context or {},
             **self._meta(),
-        })
+        }, wait=True)
 
     def log_complete(self, stats: dict[str, Any] | None = None) -> bool:
-        """Log run completion with stats (duration_seconds, items, etc.)."""
+        """Log run completion with stats (duration_seconds, items, etc.).
+
+        Blocks up to 5s to ensure the event is delivered before process exit.
+        """
         if not self.enabled:
             return False
         return self._post({
             "event": "run_complete",
             "stats": stats or {},
             **self._meta(),
-        })
+        }, wait=True)
 
     def log_event(self, event_name: str, data: dict[str, Any] | None = None) -> bool:
         """Log a custom event (user_tier_detected, rate_limited, etc.)."""
@@ -97,11 +100,13 @@ class ActorLogger:
             "is_paying": os.getenv("APIFY_USER_IS_PAYING"),
         }
 
-    def _post(self, data: dict) -> bool:
-        """Fire-and-forget POST via background thread. No async deps needed."""
+    def _post(self, data: dict, wait: bool = False) -> bool:
+        """POST via background thread. Set wait=True to block until delivered."""
         try:
             thread = threading.Thread(target=self._post_sync, args=(data,), daemon=True)
             thread.start()
+            if wait:
+                thread.join(timeout=5)
             return True
         except Exception as e:
             logger.warning("actor-logger: failed to schedule webhook: %s", e)

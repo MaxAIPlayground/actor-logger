@@ -32,12 +32,12 @@ def is_free_tier() -> bool:
 def _get_owner_token() -> str:
     """Get the owner token for KV store operations.
 
-    Reads from OWNER_TOKEN env var. This must be set on each actor's
+    Reads from OWNER_APIFY_TOKEN env var. This must be set on each actor's
     Apify env vars (the actor owner's API token, not the calling user's).
     """
-    token = os.getenv("OWNER_TOKEN", "")
+    token = os.getenv("OWNER_APIFY_TOKEN", "")
     if not token:
-        logger.warning("actor-logger: OWNER_TOKEN not set, free tier tracking disabled")
+        logger.warning("actor-logger: OWNER_APIFY_TOKEN not set, free tier tracking disabled")
     return token
 
 

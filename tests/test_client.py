@@ -2,11 +2,10 @@
 
 import json
 import os
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, MagicMock
+from urllib.error import URLError
 
 import pytest
-import pytest_asyncio
-from aioresponses import aioresponses
 
 from actor_logger import ActorLogger
 
@@ -44,19 +43,35 @@ class TestActorLogger:
     def test_enabled_with_url(self, logger):
         assert logger.enabled
 
-    @pytest.mark.asyncio
-    async def test_log_start_sends_two_events(self, logger):
-        payloads = []
-        with aioresponses() as m:
-            m.post(WEBHOOK_URL, repeat=True, status=200, payload={"success": True})
-            await logger._post_async({"event": "actor_start", **logger._meta()})
-            await logger._post_async({
-                "event": "input_logged",
-                "input": {"query": "test"},
-                **logger._meta(),
-            })
+    def test_log_start_fires_post(self, logger):
+        with patch.object(logger, "_post", return_value=True) as mock_post:
+            logger.log_start({"query": "test"})
+            assert mock_post.call_count == 2
+            events = [call.args[0]["event"] for call in mock_post.call_args_list]
+            assert events == ["actor_start", "input_logged"]
 
-        # Verify we can construct the payloads
+    def test_log_error_payload(self, logger):
+        with patch.object(logger, "_post", return_value=True) as mock_post:
+            try:
+                raise ValueError("something broke")
+            except Exception as e:
+                logger.log_error(e, {"severity": "critical", "stage": "search"})
+
+            payload = mock_post.call_args[0][0]
+            assert payload["event"] == "error"
+            assert payload["error"]["type"] == "ValueError"
+            assert payload["error"]["message"] == "something broke"
+            assert payload["context"]["severity"] == "critical"
+
+    def test_log_complete_payload(self, logger):
+        with patch.object(logger, "_post", return_value=True) as mock_post:
+            logger.log_complete({"duration_seconds": 42, "items": 150})
+
+            payload = mock_post.call_args[0][0]
+            assert payload["event"] == "run_complete"
+            assert payload["stats"]["items"] == 150
+
+    def test_meta_fields(self, logger):
         meta = logger._meta()
         assert meta["run_id"] == "run123"
         assert meta["actor_id"] == "clearpath/test-actor"
@@ -64,74 +79,34 @@ class TestActorLogger:
         assert meta["apify_meta_origin"] == "WEB"
         assert "timestamp" in meta
 
-    @pytest.mark.asyncio
-    async def test_log_error_payload(self, logger):
-        with aioresponses() as m:
-            m.post(WEBHOOK_URL, status=200, payload={"success": True})
+    def test_post_sync_sends_request(self, logger):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
 
-            try:
-                raise ValueError("something broke")
-            except Exception as e:
-                data = {
-                    "event": "error",
-                    "error": {
-                        "message": str(e),
-                        "type": type(e).__name__,
-                    },
-                    "context": {"severity": "critical", "stage": "search"},
-                    **logger._meta(),
-                }
-                result = await logger._post_async(data)
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            result = logger._post_sync({"event": "test", **logger._meta()})
 
-            assert result is True
-            assert data["error"]["type"] == "ValueError"
-            assert data["error"]["message"] == "something broke"
-            assert data["context"]["severity"] == "critical"
+        assert result is True
+        call_args = mock_urlopen.call_args
+        req = call_args[0][0]
+        assert req.full_url == WEBHOOK_URL
+        assert req.get_header("Authorization") == f"Bearer {API_KEY}"
+        assert req.get_header("Content-type") == "application/json"
 
-    @pytest.mark.asyncio
-    async def test_log_complete_payload(self, logger):
-        with aioresponses() as m:
-            m.post(WEBHOOK_URL, status=200, payload={"success": True})
+    def test_post_sync_failure_returns_false(self, logger):
+        with patch("urllib.request.urlopen", side_effect=URLError("connection refused")):
+            result = logger._post_sync({"event": "test"})
+        assert result is False
 
-            stats = {"duration_seconds": 42, "items": 150}
-            data = {"event": "run_complete", "stats": stats, **logger._meta()}
-            result = await logger._post_async(data)
-
-            assert result is True
-            assert data["stats"]["items"] == 150
-
-    @pytest.mark.asyncio
-    async def test_auth_header_sent(self, logger):
-        with aioresponses() as m:
-            m.post(WEBHOOK_URL, status=200, payload={"success": True})
-            await logger._post_async({"event": "test", **logger._meta()})
-
-            # aioresponses uses URL objects as keys
-            calls = list(m.requests.values())
-            assert len(calls) == 1
-            request_kwargs = calls[0][0].kwargs
-            assert request_kwargs["headers"]["Authorization"] == f"Bearer {API_KEY}"
-
-    @pytest.mark.asyncio
-    async def test_webhook_failure_returns_false(self, logger):
-        with aioresponses() as m:
-            m.post(WEBHOOK_URL, status=500)
-            result = await logger._post_async({"event": "test"})
-            assert result is False
-
-    @pytest.mark.asyncio
-    async def test_sensitive_input_filtered(self, logger):
+    def test_sensitive_input_filtered(self, logger):
         input_data = {
             "query": "Berlin apartments",
             "password": "secret123",
             "api_token": "tok_xyz",
             "maxResults": 10,
         }
-        with aioresponses() as m:
-            m.post(WEBHOOK_URL, repeat=True, status=200, payload={"success": True})
-            logger.log_start(input_data)
-
-        # Verify sanitization directly
         from actor_logger.helpers import sanitize_input
         sanitized = sanitize_input(input_data)
         assert "query" in sanitized

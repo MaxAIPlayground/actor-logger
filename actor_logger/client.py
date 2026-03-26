@@ -1,14 +1,14 @@
 """Structured event logging to actor-logging webhook."""
 
-import asyncio
 import json
 import logging
 import os
+import threading
 import traceback
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from typing import Any
-
-import aiohttp
 
 from .helpers import resolve_actor_id, sanitize_input
 
@@ -98,39 +98,31 @@ class ActorLogger:
         }
 
     def _post(self, data: dict) -> bool:
-        """Fire-and-forget POST. Uses running event loop if available, otherwise creates one."""
+        """Fire-and-forget POST via background thread. No async deps needed."""
         try:
-            try:
-                loop = asyncio.get_running_loop()
-                asyncio.create_task(self._post_async(data))
-                return True
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    return loop.run_until_complete(self._post_async(data))
-                finally:
-                    loop.close()
+            thread = threading.Thread(target=self._post_sync, args=(data,), daemon=True)
+            thread.start()
+            return True
         except Exception as e:
             logger.warning("actor-logger: failed to schedule webhook: %s", e)
             return False
 
-    async def _post_async(self, data: dict) -> bool:
+    def _post_sync(self, data: dict) -> bool:
         try:
-            headers = {"Content-Type": "application/json"}
+            body = json.dumps(data, default=str).encode("utf-8")
+            req = urllib.request.Request(
+                self.webhook_url,
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
             if self.api_key:
-                headers["Authorization"] = f"Bearer {self.api_key}"
-            timeout = aiohttp.ClientTimeout(total=5)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    self.webhook_url,
-                    data=json.dumps(data, default=str),
-                    headers=headers,
-                ) as resp:
-                    if resp.status == 200:
-                        return True
-                    logger.warning("actor-logger: webhook returned %d", resp.status)
-                    return False
+                req.add_header("Authorization", f"Bearer {self.api_key}")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    return True
+                logger.warning("actor-logger: webhook returned %d", resp.status)
+                return False
         except Exception as e:
-            logger.warning("actor-logger: webhook POST failed: %s", e)
+            logger.warning("actor-logger: webhook POST failed: [%s] %r", type(e).__name__, e)
             return False

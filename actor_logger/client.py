@@ -32,14 +32,14 @@ class ActorLogger:
         """Log actor start + sanitized input. Call once after Actor.get_input()."""
         if not self.enabled:
             return False
-        self._post({"event": "actor_start", **self._meta()})
+        result = self._post({"event": "actor_start", **self._meta()})
         if input_data is not None:
-            self._post({
+            result = self._post({
                 "event": "input_logged",
                 "input": sanitize_input(input_data),
                 **self._meta(),
             })
-        return True
+        return result
 
     def log_error(self, error: Exception | str, context: dict[str, Any] | None = None) -> bool:
         """Log an error with optional context (severity, stage, etc.)."""
@@ -90,6 +90,7 @@ class ActorLogger:
             "run_id": os.getenv("APIFY_ACT_RUN_ID"),
             "actor_id": resolve_actor_id(),
             "user_id": os.getenv("APIFY_USER_ID"),
+            "memory_mbytes": os.getenv("APIFY_MEMORY_MBYTES"),
             "build_number": os.getenv("ACTOR_BUILD_NUMBER"),
             "apify_meta_origin": os.getenv("APIFY_META_ORIGIN"),
         }

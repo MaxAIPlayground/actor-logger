@@ -1,6 +1,7 @@
 """Shared utilities: input sanitization, formatting."""
 
 import json
+import os
 from pathlib import Path
 
 _SENSITIVE_KEYS = {"password", "token", "secret", "apikey", "proxy", "api_key", "api_token"}
@@ -63,7 +64,6 @@ def resolve_actor_id() -> str | None:
     2. .actor/actor.json 'name' field (always present locally)
     3. Current directory name (last resort)
     """
-    import os
     name = os.getenv("ACTOR_FULL_NAME")
     if name:
         return name

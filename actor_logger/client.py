@@ -77,15 +77,19 @@ class ActorLogger:
             **self._meta(),
         }, wait=True)
 
-    def log_event(self, event_name: str, data: dict[str, Any] | None = None) -> bool:
-        """Log a custom event (user_tier_detected, rate_limited, etc.)."""
+    def log_event(self, event_name: str, data: dict[str, Any] | None = None, wait: bool = False) -> bool:
+        """Log a custom event (user_tier_detected, rate_limited, run_aborted, etc.).
+
+        Set wait=True to block until delivered (useful for terminal events like
+        run_aborted / run_failed where the process is about to exit).
+        """
         if not self.enabled:
             return False
         return self._post({
             "event": event_name,
             **(data or {}),
             **self._meta(),
-        })
+        }, wait=wait)
 
     def _meta(self) -> dict:
         meta = {

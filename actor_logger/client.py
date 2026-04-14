@@ -109,12 +109,26 @@ class ActorLogger:
         return meta
 
     def _post(self, data: dict, wait: bool = False) -> bool:
-        """POST via background thread. Set wait=True to block until delivered."""
+        """POST via background thread. Set wait=True to block until delivered.
+
+        When wait=True, returns the actual POST result (True on HTTP 200). When
+        wait=False, returns True if the thread was scheduled — delivery is
+        best-effort and the daemon thread may be killed on process exit.
+        """
+        result: dict = {"ok": False}
+
+        def target() -> None:
+            result["ok"] = self._post_sync(data)
+
         try:
-            thread = threading.Thread(target=self._post_sync, args=(data,), daemon=True)
+            thread = threading.Thread(target=target, daemon=True)
             thread.start()
             if wait:
-                thread.join(timeout=5)
+                thread.join(timeout=10)
+                if thread.is_alive():
+                    logger.warning("actor-logger: webhook POST exceeded 10s timeout")
+                    return False
+                return result["ok"]
             return True
         except Exception as e:
             logger.warning("actor-logger: failed to schedule webhook: %s", e)

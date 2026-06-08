@@ -126,12 +126,12 @@ class ActorLogger:
             if wait:
                 thread.join(timeout=10)
                 if thread.is_alive():
-                    logger.warning("actor-logger: webhook POST exceeded 10s timeout")
+                    logger.debug("actor-logger: webhook POST exceeded 10s timeout")
                     return False
                 return result["ok"]
             return True
         except Exception as e:
-            logger.warning("actor-logger: failed to schedule webhook: %s", e)
+            logger.debug("actor-logger: failed to schedule webhook: %s", e)
             return False
 
     def _post_sync(self, data: dict) -> bool:
@@ -148,8 +148,8 @@ class ActorLogger:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 if resp.status == 200:
                     return True
-                logger.warning("actor-logger: webhook returned %d", resp.status)
+                logger.debug("actor-logger: webhook returned %d", resp.status)
                 return False
         except Exception as e:
-            logger.warning("actor-logger: webhook POST failed: [%s] %r", type(e).__name__, e)
+            logger.debug("actor-logger: webhook POST failed: [%s] %r", type(e).__name__, e)
             return False

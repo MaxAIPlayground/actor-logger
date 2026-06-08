@@ -37,7 +37,10 @@ def _get_owner_token() -> str:
     """
     token = os.getenv("OWNER_APIFY_TOKEN", "")
     if not token:
-        logger.warning("actor-logger: OWNER_APIFY_TOKEN not set, free tier tracking disabled")
+        # DEBUG, not WARNING: on the Apify platform the SDK pipes warnings to the
+        # user-visible run log, which would leak the env var name + tracking mechanism.
+        # Developers can still see this locally via APIFY_LOG_LEVEL=DEBUG.
+        logger.debug("OWNER_APIFY_TOKEN not set, free tier tracking disabled")
     return token
 
 

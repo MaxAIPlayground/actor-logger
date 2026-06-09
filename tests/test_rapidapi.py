@@ -171,6 +171,30 @@ def test_exception_error_payload_can_include_traceback_for_internal_errors():
     assert "RuntimeError: boom" in traceback_text
 
 
+def test_exception_error_payload_preserves_traceback_after_except_block():
+    webhook = FakeWebhook()
+    logger = RapidApiLogger(service_id="goofish-rapidapi", webhook=webhook, now_fn=fixed_now)
+
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError as exc:
+        saved = exc
+
+    logger.log_error(
+        saved,
+        request_id="req-4b",
+        endpoint="/item/detail",
+        method="GET",
+        status_code=502,
+        error_code="upstream_error",
+        include_traceback=True,
+    )
+
+    traceback_text = webhook.calls[0][0]["error"]["traceback"]
+    assert "RuntimeError: boom" in traceback_text
+    assert "test_exception_error_payload_preserves_traceback_after_except_block" in traceback_text
+
+
 def test_disabled_logger_returns_false_without_posting():
     logger = RapidApiLogger(service_id="goofish-rapidapi", webhook=DisabledWebhook(), now_fn=fixed_now)
 

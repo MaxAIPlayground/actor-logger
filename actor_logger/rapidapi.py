@@ -125,8 +125,10 @@ class RapidApiLogger:
         if isinstance(error, Exception):
             formatted_traceback = None
             if include_traceback:
-                formatted_traceback = traceback.format_exc()
-                if formatted_traceback.strip() == "NoneType: None":
+                formatted_traceback = "".join(
+                    traceback.format_exception(type(error), error, error.__traceback__)
+                )
+                if not formatted_traceback.strip():
                     formatted_traceback = None
             return {
                 "message": str(error),

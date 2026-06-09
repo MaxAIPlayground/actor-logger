@@ -34,17 +34,31 @@ class WebhookLogger:
         self.enabled = bool(self.webhook_url)
 
     def post(self, data: dict[str, Any], wait: bool = False) -> bool:
-        """POST via background thread. Set wait=True for terminal events."""
+        """POST via background thread. Set wait=True for terminal events.
+
+        When wait=True, returns the actual POST result (True on HTTP 200). When
+        wait=False, returns True if the thread was scheduled. Delivery is then
+        best-effort because the daemon thread may be killed on process exit.
+        """
         if not self.enabled:
             return False
+        result: dict[str, bool] = {"ok": False}
+
+        def target() -> None:
+            result["ok"] = self.post_sync(data)
+
         try:
-            thread = threading.Thread(target=self.post_sync, args=(data,), daemon=True)
+            thread = threading.Thread(target=target, daemon=True)
             thread.start()
             if wait:
                 thread.join(timeout=self.join_timeout)
+                if thread.is_alive():
+                    logger.debug("actor-logger: webhook POST exceeded %ss timeout", self.join_timeout)
+                    return False
+                return result["ok"]
             return True
         except Exception as e:
-            logger.warning("actor-logger: failed to schedule webhook: %s", e)
+            logger.debug("actor-logger: failed to schedule webhook: %s", e)
             return False
 
     def post_sync(self, data: dict[str, Any]) -> bool:
@@ -64,8 +78,8 @@ class WebhookLogger:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 if resp.status == 200:
                     return True
-                logger.warning("actor-logger: webhook returned %d", resp.status)
+                logger.debug("actor-logger: webhook returned %d", resp.status)
                 return False
         except Exception as e:
-            logger.warning("actor-logger: webhook POST failed: [%s] %r", type(e).__name__, e)
+            logger.debug("actor-logger: webhook POST failed: [%s] %r", type(e).__name__, e)
             return False

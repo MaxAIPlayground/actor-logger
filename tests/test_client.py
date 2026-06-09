@@ -100,6 +100,13 @@ class TestActorLogger:
             result = logger._post_sync({"event": "test"})
         assert result is False
 
+    def test_post_delegates_to_webhook_transport(self, logger):
+        with patch.object(logger.webhook, "post", return_value=True) as mock_post:
+            result = logger._post({"event": "test"}, wait=True)
+
+        assert result is True
+        mock_post.assert_called_once_with({"event": "test"}, wait=True)
+
     def test_sensitive_input_filtered(self, logger):
         input_data = {
             "query": "Berlin apartments",

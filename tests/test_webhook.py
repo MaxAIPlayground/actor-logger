@@ -67,3 +67,21 @@ def test_post_sync_failure_returns_false():
         result = logger.post_sync({"event": "test"})
 
     assert result is False
+
+
+def test_post_wait_true_returns_actual_delivery_result():
+    logger = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
+
+    with patch.object(logger, "post_sync", return_value=False):
+        result = logger.post({"event": "terminal"}, wait=True)
+
+    assert result is False
+
+
+def test_post_wait_false_returns_scheduled_result():
+    logger = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
+
+    with patch.object(logger, "post_sync", return_value=False):
+        result = logger.post({"event": "best_effort"}, wait=False)
+
+    assert result is True

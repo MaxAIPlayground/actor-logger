@@ -10,6 +10,15 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _unquote(value: str) -> str:
+    """Strip whitespace and any surrounding quote characters.
+
+    A URL or bearer token never legitimately starts or ends with a quote, so
+    stripping unconditionally also repairs the unbalanced `"https://…` case.
+    """
+    return value.strip().strip("\"'").strip()
+
+
 class WebhookLogger:
     """Small stdlib-only JSON webhook transport.
 
@@ -27,8 +36,10 @@ class WebhookLogger:
     ):
         resolved_url = os.getenv("ACTOR_LOG_WEBHOOK_URL", "") if webhook_url is None else webhook_url
         resolved_key = os.getenv("ACTOR_LOG_API_KEY", "") if api_key is None else api_key
-        self.webhook_url = resolved_url.strip()
-        self.api_key = resolved_key.strip()
+        # Secrets pasted with their .env quotes still attached ('"https://…"')
+        # otherwise reach urllib as scheme `"https` and every POST dies.
+        self.webhook_url = _unquote(resolved_url)
+        self.api_key = _unquote(resolved_key)
         self.timeout = timeout
         self.join_timeout = join_timeout
         self.enabled = bool(self.webhook_url)

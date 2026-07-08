@@ -37,6 +37,21 @@ def test_explicit_config_overrides_environment():
     assert logger.api_key == API_KEY
 
 
+def test_quoted_env_values_are_unwrapped():
+    """A secret stored with its .env quotes attached must still be usable.
+
+    Unbalanced (`"https://…`) is the observed real-world case: urllib parses
+    the scheme as `"https` and every POST dies with URLError.
+    """
+    for raw in (f'"{WEBHOOK_URL}"', f"'{WEBHOOK_URL}'", f'"{WEBHOOK_URL}', f' {WEBHOOK_URL}" '):
+        with patch.dict(os.environ, {"ACTOR_LOG_WEBHOOK_URL": raw, "ACTOR_LOG_API_KEY": f'"{API_KEY}"'}):
+            logger = WebhookLogger()
+
+        assert logger.webhook_url == WEBHOOK_URL, raw
+        assert logger.api_key == API_KEY
+        assert logger.enabled is True
+
+
 def test_post_sync_sends_authorized_json_request():
     logger = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
 

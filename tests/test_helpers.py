@@ -52,3 +52,28 @@ class TestFormatDuration:
 
     def test_hours(self):
         assert format_duration(3725) == "1h 2m"
+
+
+def test_sanitize_input_strips_second_factor_material():
+    """verificationCode is a declared secret input; it must never be transmitted.
+
+    Also guards the over-matching direction: useStoredCredentials is an
+    innocuous bool and must survive.
+    """
+    raw = {
+        "password": "hunter2",
+        "verificationCode": "123456",
+        "verification_code": "123456",
+        "passphrase": "correct horse",
+        "otp": "999111",
+        "username": "user@example.com",
+        "useStoredCredentials": True,
+        "skipDeduplication": False,
+    }
+    out = sanitize_input(raw)
+
+    for leaked in ("password", "verificationCode", "verification_code", "passphrase", "otp"):
+        assert leaked not in out, f"{leaked} survived sanitize_input"
+    assert out["username"] == "user@example.com"
+    assert out["useStoredCredentials"] is True
+    assert out["skipDeduplication"] is False

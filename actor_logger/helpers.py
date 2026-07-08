@@ -4,7 +4,14 @@ import json
 import os
 from pathlib import Path
 
-_SENSITIVE_KEYS = {"password", "token", "secret", "apikey", "proxy", "api_key", "api_token"}
+# Substring-matched against the lowercased key. Keep entries specific enough not
+# to swallow innocuous fields (e.g. "credential" would eat useStoredCredentials).
+_SENSITIVE_KEYS = {
+    "password", "token", "secret", "apikey", "proxy", "api_key", "api_token",
+    # One-time / second-factor material. `verificationCode` is a declared secret
+    # input on at least one actor and was previously transmitted in the clear.
+    "verificationcode", "verification_code", "passphrase", "otp",
+}
 _LIST_DISPLAY_LIMIT = 25
 _actor_json_cache: dict[str, str | None] = {}
 

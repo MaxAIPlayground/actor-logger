@@ -100,3 +100,68 @@ def test_post_wait_false_returns_scheduled_result():
         result = logger.post({"event": "best_effort"}, wait=False)
 
     assert result is True
+
+
+# --- delivery guarantee -------------------------------------------------
+# Silent loss made every error count a lower bound: on 2026-07-15 a failing actor run
+# produced NO telemetry at all (not even actor_start) on a path that explicitly calls
+# log_error, while a sibling actor logged fine the same day.
+
+
+def test_post_sync_retries_transient_failures():
+    """One blip used to lose the event forever."""
+    logger_ = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
+    with patch("actor_logger.webhook.urllib.request.urlopen") as urlopen, \
+            patch("actor_logger.webhook.time.sleep"):
+        urlopen.side_effect = [URLError("boom"), URLError("boom"), _response(200)]
+        assert logger_.post_sync({"event": "error"}) is True
+        assert urlopen.call_count == 3
+
+
+def test_post_sync_gives_up_after_tries_and_reports_false():
+    logger_ = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
+    with patch("actor_logger.webhook.urllib.request.urlopen") as urlopen, \
+            patch("actor_logger.webhook.time.sleep"):
+        urlopen.side_effect = URLError("down")
+        assert logger_.post_sync({"event": "error"}, tries=3) is False
+        assert urlopen.call_count == 3
+
+
+def test_post_sync_does_not_retry_4xx():
+    """A rejected payload or a bad key fails the same way every time — retrying only
+    burns the exit flush budget."""
+    from urllib.error import HTTPError
+    logger_ = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
+    with patch("actor_logger.webhook.urllib.request.urlopen") as urlopen, \
+            patch("actor_logger.webhook.time.sleep"):
+        urlopen.side_effect = HTTPError(WEBHOOK_URL, 401, "unauthorized", {}, None)
+        assert logger_.post_sync({"event": "error"}) is False
+        assert urlopen.call_count == 1, "4xx must not be retried"
+
+
+def test_post_sync_retries_5xx():
+    from urllib.error import HTTPError
+    logger_ = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
+    with patch("actor_logger.webhook.urllib.request.urlopen") as urlopen, \
+            patch("actor_logger.webhook.time.sleep"):
+        urlopen.side_effect = [HTTPError(WEBHOOK_URL, 502, "bad gateway", {}, None), _response(200)]
+        assert logger_.post_sync({"event": "error"}) is True
+        assert urlopen.call_count == 2
+
+
+def test_join_timeout_covers_the_retry_budget():
+    """join_timeout was 5 while a single attempt could take `timeout`=10, so a waited
+    terminal event was abandoned mid-flight and then killed at exit."""
+    logger_ = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
+    assert logger_.join_timeout >= logger_.timeout, "a waited POST is abandoned before it can finish"
+
+
+def test_inflight_posts_are_tracked_then_released_for_the_exit_flush():
+    """log_start posts fire-and-forget; without the atexit flush its daemon thread is
+    killed at process exit and the event vanishes."""
+    from actor_logger import webhook as wh
+    logger_ = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
+    with patch("actor_logger.webhook.urllib.request.urlopen", return_value=_response(200)):
+        assert logger_.post({"event": "actor_start"}, wait=True) is True
+    assert wh._inflight == set(), "finished POSTs must be untracked, else flush waits on corpses"
+    wh._flush_inflight()          # no-op when nothing is in flight

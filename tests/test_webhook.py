@@ -4,6 +4,7 @@ import os
 from unittest.mock import MagicMock, patch
 from urllib.error import URLError
 
+from actor_logger import webhook as wh
 from actor_logger.webhook import WebhookLogger
 
 
@@ -63,7 +64,8 @@ def test_post_sync_sends_authorized_json_request():
     assert req.full_url == WEBHOOK_URL
     assert req.get_header("Authorization") == f"Bearer {API_KEY}"
     assert req.get_header("Content-type") == "application/json"
-    assert mock_urlopen.call_args.kwargs["timeout"] == 10
+    # was hardcoded 10; telemetry now runs on a tight, env-tunable budget (see webhook.POST_TIMEOUT_S)
+    assert mock_urlopen.call_args.kwargs["timeout"] == wh.POST_TIMEOUT_S
 
 
 def test_post_sync_returns_false_for_non_200():
@@ -149,11 +151,31 @@ def test_post_sync_retries_5xx():
         assert urlopen.call_count == 2
 
 
-def test_join_timeout_covers_the_retry_budget():
-    """join_timeout was 5 while a single attempt could take `timeout`=10, so a waited
-    terminal event was abandoned mid-flight and then killed at exit."""
+def test_exit_budget_is_bounded_on_both_sides():
+    """Telemetry must not tax the product path. An actor's exit is BILLED compute, so a hung
+    webhook must never charge the fleet to deliver an observability event -- loss is already
+    visible via `clearpath db health` (`N start . M done` -> `no-terminal`).
+
+    Two-sided on purpose:
+      lower -- join_timeout must cover the full retry budget, else a waited terminal event is
+               abandoned mid-flight and killed at exit (it was 5 while timeout alone was 10).
+      upper -- and it must stay SMALL. 35s once shipped here; this is the guard against that.
+    """
     logger_ = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY)
-    assert logger_.join_timeout >= logger_.timeout, "a waited POST is abandoned before it can finish"
+    backoff = sum(0.5 * (2 ** i) for i in range(max(1, wh.POST_TRIES) - 1))
+    worst = wh.POST_TRIES * logger_.timeout + backoff
+    assert logger_.join_timeout >= worst, (
+        f"join_timeout={logger_.join_timeout} cannot cover {wh.POST_TRIES} tries "
+        f"x {logger_.timeout}s + {backoff}s backoff = {worst}s; a waited POST dies mid-retry")
+    assert worst <= 15, f"worst-case exit block {worst}s is too much billed compute for telemetry"
+    assert logger_.join_timeout <= 15, f"join_timeout={logger_.join_timeout} blocks exit too long"
+
+
+def test_explicit_timeout_still_overrides_the_env_default():
+    """A long-lived non-actor service can afford to wait; it must be able to opt out of the
+    actor-tight budget without touching this library."""
+    logger_ = WebhookLogger(webhook_url=WEBHOOK_URL, api_key=API_KEY, timeout=30, join_timeout=99)
+    assert logger_.timeout == 30 and logger_.join_timeout == 99
 
 
 def test_inflight_posts_are_tracked_then_released_for_the_exit_flush():

@@ -25,7 +25,24 @@ class _PermanentPostError(Exception):
 # Two bounded fixes: retry transient failures, and give in-flight POSTs a chance to land at exit.
 # Failures deliberately stay on logger.debug — these run inside actors whose user-visible run log
 # must never expose internals, so telemetry problems must not surface there.
+#
+# TELEMETRY MUST NOT TAX THE PRODUCT PATH. Terminal events (log_error / log_complete) fire at the
+# last instant before the process exits, so they cannot be pure fire-and-forget — there is no
+# "later" to flush into, and not waiting at all is how they were lost. But the wait must stay
+# SMALL: an actor's exit is billed compute, so a slow/hung webhook would otherwise charge the whole
+# fleet for zero user value. Budget: POST_TRIES x POST_TIMEOUT_S + backoff <= JOIN_TIMEOUT_S,
+# ~10.5s worst case. Measured real round-trip (DNS+TCP+TLS+dispatch) is 0.11-0.19s, so a 3s
+# per-attempt timeout is >10x headroom even allowing for cross-Atlantic RTT and the DB insert.
+#
+# Losing an event is ACCEPTABLE here, because loss is already visible: `clearpath db health`
+# reconciles `N start · M done` and classifies the delta as `no-terminal`. Detecting loss after
+# the fact is strictly cheaper than every run paying to prevent it.
+#
+# All four are env-tunable so ONE actor can be adjusted without touching this library, which the
+# whole fleet pins at @master.
 POST_TRIES = int(os.getenv("ACTOR_LOG_POST_TRIES", "3"))
+POST_TIMEOUT_S = float(os.getenv("ACTOR_LOG_POST_TIMEOUT", "3"))
+JOIN_TIMEOUT_S = float(os.getenv("ACTOR_LOG_JOIN_TIMEOUT", "12"))
 FLUSH_TIMEOUT_S = float(os.getenv("ACTOR_LOG_FLUSH_TIMEOUT", "5"))
 
 _inflight: set[threading.Thread] = set()
@@ -73,11 +90,12 @@ class WebhookLogger:
         webhook_url: str | None = None,
         api_key: str | None = None,
         *,
-        timeout: float = 10,
-        # Must cover POST_TRIES attempts, else a waited terminal event is abandoned mid-retry.
-        # It was 5 while `timeout` alone was 10, so even a single slow-but-succeeding POST was
-        # given up on and then killed at exit.
-        join_timeout: float = 35,
+        # None = take the env-tunable default. Explicit values still win, so a long-lived
+        # non-actor service (which can afford to wait) can opt out of the tight actor budget.
+        timeout: float | None = None,
+        # Must cover POST_TRIES attempts, else a waited terminal event is abandoned mid-retry
+        # (it was 5 while `timeout` alone was 10). Must ALSO stay small: this is billed exit time.
+        join_timeout: float | None = None,
     ):
         resolved_url = os.getenv("ACTOR_LOG_WEBHOOK_URL", "") if webhook_url is None else webhook_url
         resolved_key = os.getenv("ACTOR_LOG_API_KEY", "") if api_key is None else api_key
@@ -85,8 +103,8 @@ class WebhookLogger:
         # otherwise reach urllib as scheme `"https` and every POST dies.
         self.webhook_url = _unquote(resolved_url)
         self.api_key = _unquote(resolved_key)
-        self.timeout = timeout
-        self.join_timeout = join_timeout
+        self.timeout = POST_TIMEOUT_S if timeout is None else timeout
+        self.join_timeout = JOIN_TIMEOUT_S if join_timeout is None else join_timeout
         self.enabled = bool(self.webhook_url)
 
     def post(self, data: dict[str, Any], wait: bool = False) -> bool:

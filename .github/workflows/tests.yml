@@ -1,0 +1,32 @@
+name: tests
+
+# Every Apify actor pins this library as `actor-logger @ git+...@master`, so whatever is on
+# master is what the whole fleet pip-installs on its next build. There is no version gate in
+# between. This workflow is that gate: if master goes red, the fleet is one rebuild away from
+# shipping it.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject declares requires-python = ">=3.10"; test the floor and the version the
+        # actors actually run (apify/actor-python:3.12), so we notice if we drift off either.
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run tests
+        run: python -m pytest tests/ -q

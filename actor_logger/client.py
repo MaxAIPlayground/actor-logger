@@ -9,6 +9,28 @@ from .helpers import resolve_actor_id, sanitize_input
 from .webhook import WebhookLogger
 
 
+def _timeout_secs() -> int | None:
+    """The run's CONFIGURED timeout in seconds, or None (local / unlimited).
+
+    Apify gives no duration env var, only ISO instants ACTOR_TIMEOUT_AT and
+    ACTOR_STARTED_AT, so it is their delta. Constant across a run's events (uses the
+    start, not now), so it is directly comparable to a run's duration. This is the one
+    run-option missing from the envelope, and the one that most often explains a
+    truncated run (a caller can override the actor default): without it a short timeout
+    can only be reverse-engineered from a unit's budget_s. Never raises."""
+    try:
+        at = os.getenv("ACTOR_TIMEOUT_AT") or os.getenv("APIFY_TIMEOUT_AT")
+        st = os.getenv("ACTOR_STARTED_AT") or os.getenv("APIFY_STARTED_AT")
+        if not at or not st:
+            return None
+        end = datetime.fromisoformat(at.replace("Z", "+00:00"))
+        start = datetime.fromisoformat(st.replace("Z", "+00:00"))
+        secs = round((end - start).total_seconds())
+        return secs if secs > 0 else None
+    except Exception:
+        return None
+
+
 class ActorLogger:
     """Fire-and-forget structured logging to a centralized webhook.
 
@@ -96,6 +118,7 @@ class ActorLogger:
             "build_number": os.getenv("ACTOR_BUILD_NUMBER"),
             "apify_meta_origin": os.getenv("APIFY_META_ORIGIN"),
             "max_total_charge_usd": os.getenv("ACTOR_MAX_TOTAL_CHARGE_USD"),
+            "timeout_secs": _timeout_secs(),
             "is_paying": os.getenv("APIFY_USER_IS_PAYING"),
         }
         topic = os.getenv("ACTOR_LOG_TOPIC", "").strip()

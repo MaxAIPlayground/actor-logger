@@ -78,6 +78,27 @@ class TestActorLogger:
         assert meta["user_id"] == "user456"
         assert meta["apify_meta_origin"] == "WEB"
         assert "timestamp" in meta
+        assert "timeout_secs" in meta          # always present, even when None
+
+    def test_timeout_secs_computed_from_instants(self, logger):
+        with patch.dict(os.environ, {
+            "ACTOR_STARTED_AT": "2026-07-17T06:22:45.000Z",
+            "ACTOR_TIMEOUT_AT": "2026-07-17T06:37:45.000Z",   # +900s
+        }):
+            assert logger._meta()["timeout_secs"] == 900
+
+    def test_timeout_secs_none_without_env(self, logger):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ACTOR_TIMEOUT_AT", None)
+            os.environ.pop("APIFY_TIMEOUT_AT", None)
+            assert logger._meta()["timeout_secs"] is None
+
+    def test_timeout_secs_none_on_garbage(self, logger):
+        with patch.dict(os.environ, {
+            "ACTOR_STARTED_AT": "not-a-date",
+            "ACTOR_TIMEOUT_AT": "also-bad",
+        }):
+            assert logger._meta()["timeout_secs"] is None   # never raises
 
     def test_post_sync_sends_request(self, logger):
         mock_resp = MagicMock()

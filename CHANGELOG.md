@@ -3,6 +3,16 @@
 Consumers pin this library as `actor-logger @ git+...@master`, so every entry here reaches the
 whole actor fleet on its next build. There is no version gate in between.
 
+## 0.3.2 — 2026-07-18
+
+- **Stamp the run's configured `timeout_secs` on every event.** The envelope carried
+  `memory_mbytes` and `max_total_charge_usd` but not the timeout — the one run-option a caller
+  can override and the one that most often explains a truncated run. Without it a short timeout
+  could only be reverse-engineered from a unit's `budget_s` (cost real debugging time). Computed
+  from `ACTOR_TIMEOUT_AT` − `ACTOR_STARTED_AT` (Apify exposes instants, not a duration); constant
+  across a run's events, so directly comparable to duration. `None` locally / unlimited; never raises.
+- Lands in the `data` JSON column — queryable as `$.timeout_secs`, no migration.
+
 ## 0.3.1 — 2026-07-17
 
 - **Cap the telemetry exit budget.** `timeout` 10s→3s, `join_timeout` 35s→12s. Worst case at exit
